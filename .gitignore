@@ -1,0 +1,41 @@
+# Environment & secrets
+.env
+*.env
+schwab_token.json
+*_token.json
+
+# Database (too large for git)
+*.db
+*.db-wal
+*.db-shm
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.pytest_cache/
+*.egg-info/
+dist/
+build/
+.venv/
+venv/
+env/
+
+# Data files
+data/
+*.csv
+*.gz
+*.parquet
+
+# Output files
+*_chart.png
+backtest_results.png
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+*.swp
