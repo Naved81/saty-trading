@@ -83,6 +83,39 @@ MAX_RETRIES    = 4
 RETRY_BASE_SEC = 2
 REQUEST_DELAY  = 0.25
 
+# ── BB Compression Breakout parameters ───────────────────────────────────────
+
+BB_COMPRESSION_LOOKBACK = 15    # 1-min bars to look back for compression history
+BB_COMPRESSION_MIN_BARS = 7     # min compressed bars required in that window
+BB_SPO_MIN              = 10.0  # minimum |SPO| to confirm breakout direction
+BB_STOP_ATR_MULT        = 0.30  # stop distance = this × prev_atr_rth from entry
+BB_ENTRY_CUTOFF         = '14:00'  # no new entries at or after 2:00 PM ET
+
+# ── SPO Divergence parameters ────────────────────────────────────────────────
+# Matches Saty Phase Oscillator with Divergence PineScript defaults.
+
+DIV_LB_LEFT    = 3    # pivot lookback left  (bars that must be higher/lower)
+DIV_LB_RIGHT   = 1    # pivot lookback right (confirmation lag)
+DIV_RANGE_MIN  = 5    # min bars between consecutive pivot confirmations
+DIV_RANGE_MAX  = 60   # max bars between consecutive pivot confirmations
+
+# Timeframes (in minutes) to resample 1-min data to for divergence scanning
+DIV_TIMEFRAMES = [3, 5, 10]
+
+# ── TTM Squeeze parameters ───────────────────────────────────────────────────
+# Matches Beardy Squeeze Pro PineScript defaults exactly.
+
+TTM_LENGTH       = 20     # lookback for all BB / KC / momentum components
+TTM_BB_MULT      = 2.0    # Bollinger Band std multiplier
+TTM_KC_MULT_HIGH = 1.0    # Keltner Channel inner multiplier  (orange dot)
+TTM_KC_MULT_MID  = 1.5    # Keltner Channel mid multiplier    (red dot)
+TTM_KC_MULT_LOW  = 2.0    # Keltner Channel outer multiplier  (black dot)
+
+# Intraday breakout strategy using TTM Squeeze
+TTM_SQUEEZE_MIN_BARS = 5     # min bars in squeeze before a fire counts
+TTM_STOP_ATR_MULT    = 0.30  # stop distance = this × prev_atr_rth from entry
+TTM_ENTRY_CUTOFF     = '14:00'  # no new entries at or after 2:00 PM ET
+
 # ── Telegram ──────────────────────────────────────────────────────────────────
 
 TELEGRAM_BOT_TOKEN = os.environ.get('TELEGRAM_BOT_TOKEN')

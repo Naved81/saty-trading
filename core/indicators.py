@@ -15,6 +15,7 @@ Key design:
 
 import pandas as pd
 import numpy as np
+from numpy.lib.stride_tricks import sliding_window_view
 
 
 # ── ATR ───────────────────────────────────────────────────────────────────────
@@ -200,3 +201,257 @@ def build_daily_reference(df_full: pd.DataFrame,
     daily  = pd.concat([daily, ribbon[['bullish','bearish']]], axis=1)
 
     return daily
+
+
+# ── TTM Squeeze helpers ───────────────────────────────────────────────────────
+
+def _rolling_linreg_end(series: pd.Series, length: int) -> pd.Series:
+    """
+    Vectorised rolling linear regression — returns the fitted value at the
+    LAST point of each window (equivalent to ta.linreg(series, length, 0)
+    in PineScript).
+
+    Uses numpy sliding_window_view for speed; handles NaN rows gracefully.
+    """
+    arr = series.values.astype(float)
+    n   = len(arr)
+    if n < length:
+        return pd.Series(np.nan, index=series.index)
+
+    x     = np.arange(length, dtype=float)
+    x_bar = (length - 1) / 2.0
+    ss_xx = ((x - x_bar) ** 2).sum()
+
+    windows  = sliding_window_view(arr, length)          # (n-length+1, length)
+    nan_mask = np.any(np.isnan(windows), axis=1)         # rows with any NaN
+
+    y_bar = np.where(nan_mask, np.nan, windows.mean(axis=1))
+
+    delta_y = np.where(nan_mask[:, None], np.nan, windows - y_bar[:, None])
+    ss_xy   = np.where(nan_mask, np.nan, ((x - x_bar) * delta_y).sum(axis=1))
+
+    b    = ss_xy / ss_xx
+    a    = y_bar - b * x_bar
+    vals = a + b * (length - 1)
+
+    out             = np.full(n, np.nan)
+    out[length - 1:] = vals
+    return pd.Series(out, index=series.index)
+
+
+# ── TTM Squeeze ───────────────────────────────────────────────────────────────
+
+def calc_ttm_squeeze(df: pd.DataFrame,
+                     length: int = 20,
+                     bb_mult: float = 2.0,
+                     kc_mult_high: float = 1.0,
+                     kc_mult_mid: float = 1.5,
+                     kc_mult_low: float = 2.0) -> pd.DataFrame:
+    """
+    TTM Squeeze — Python translation of the Beardy Squeeze Pro PineScript.
+
+    Squeeze state: Bollinger Bands compressed inside Keltner Channels.
+    Three KC levels reveal squeeze intensity (high/mid/low).
+    Momentum oscillator: linreg of (close − midrange/SMA anchor).
+
+    Keltner Channel uses SMA of True Range (not Wilder ATR), matching
+    the PineScript  devKC = ta.sma(ta.tr, length)  exactly.
+
+    Args:
+        df           : DataFrame with columns high, low, close
+        length       : lookback for all components (default 20)
+        bb_mult      : BB standard-deviation multiplier (default 2.0)
+        kc_mult_high : inner KC multiplier  — orange dot (default 1.0)
+        kc_mult_mid  : middle KC multiplier — red dot   (default 1.5)
+        kc_mult_low  : outer KC multiplier  — black dot (default 2.0)
+
+    Returns DataFrame with columns:
+        bb_basis, bb_upper, bb_lower
+        kc_basis, kc_upper/lower_high/mid/low
+        no_sqz          : bool — BB extends outside outer KC  (green dot)
+        squeeze_state   : 'none' | 'low' | 'mid' | 'high'
+        in_squeeze      : bool — any squeeze level active (not no_sqz)
+        momentum        : float — linreg oscillator
+        mom_up          : bool — momentum rising vs prior bar
+        squeeze_fired   : bool — transition squeeze → no squeeze
+        squeeze_started : bool — transition no squeeze → squeeze
+    """
+    out = pd.DataFrame(index=df.index)
+
+    # ── Bollinger Bands (SMA + sample stdev) ──
+    sma            = df['close'].rolling(length, min_periods=length).mean()
+    stdev          = df['close'].rolling(length, min_periods=length).std()
+    out['bb_basis'] = sma
+    out['bb_upper'] = sma + bb_mult * stdev
+    out['bb_lower'] = sma - bb_mult * stdev
+
+    # ── Keltner Channels (SMA of True Range — matches PineScript) ──
+    tr = pd.concat([
+        df['high'] - df['low'],
+        (df['high'] - df['close'].shift(1)).abs(),
+        (df['low']  - df['close'].shift(1)).abs(),
+    ], axis=1).max(axis=1)
+    kc_dev = tr.rolling(length, min_periods=length).mean()
+
+    out['kc_basis']      = sma   # shared with BB
+    out['kc_upper_high'] = sma + kc_mult_high * kc_dev
+    out['kc_lower_high'] = sma - kc_mult_high * kc_dev
+    out['kc_upper_mid']  = sma + kc_mult_mid  * kc_dev
+    out['kc_lower_mid']  = sma - kc_mult_mid  * kc_dev
+    out['kc_upper_low']  = sma + kc_mult_low  * kc_dev
+    out['kc_lower_low']  = sma - kc_mult_low  * kc_dev
+
+    # ── Squeeze conditions (OR logic — exact PineScript translation) ──
+    # no_sqz  : at least one BB band outside the outermost KC → expanding
+    # high_sqz: at least one BB band inside the innermost KC  → tightest coil
+    no_sqz   = ((out['bb_lower'] <  out['kc_lower_low']) |
+                (out['bb_upper'] >  out['kc_upper_low']))
+    low_sqz  = ((out['bb_lower'] >= out['kc_lower_low']) |
+                (out['bb_upper'] <= out['kc_upper_low']))
+    mid_sqz  = ((out['bb_lower'] >= out['kc_lower_mid']) |
+                (out['bb_upper'] <= out['kc_upper_mid']))
+    high_sqz = ((out['bb_lower'] >= out['kc_lower_high']) |
+                (out['bb_upper'] <= out['kc_upper_high']))
+
+    out['no_sqz']    = no_sqz
+    out['in_squeeze'] = ~no_sqz
+
+    # Dot colour priority: high > mid > low > none  (mirrors PineScript ternary)
+    state = pd.Series('none', index=df.index)
+    state[low_sqz]  = 'low'
+    state[mid_sqz]  = 'mid'
+    state[high_sqz] = 'high'
+    out['squeeze_state'] = state
+
+    # ── Momentum oscillator ──
+    # mom = linreg(close − avg(avg(highest, lowest), sma), length, 0)
+    highest  = df['high'].rolling(length, min_periods=length).max()
+    lowest   = df['low'].rolling(length, min_periods=length).min()
+    midrange = (highest + lowest) / 2.0
+    anchor   = (midrange + sma) / 2.0
+    delta    = df['close'] - anchor
+
+    out['momentum'] = _rolling_linreg_end(delta, length)
+    out['mom_up']   = out['momentum'] > out['momentum'].shift(1)
+
+    # ── State transitions (for alerts and strategy entry) ──
+    # shift(1) produces float NaN on the first row; fillna(True) → "was no-squeeze"
+    # so the first bar never falsely fires as a squeeze_started event.
+    prev_no_sqz            = no_sqz.shift(1).fillna(True).astype(bool)
+    out['squeeze_fired']   = no_sqz  & ~prev_no_sqz   # squeeze releases
+    out['squeeze_started'] = ~no_sqz &  prev_no_sqz   # squeeze begins
+
+    return out
+
+
+# ── SPO Divergence ─────────────────────────────────────────────────────────────
+
+def calc_spo_divergence(
+    df: pd.DataFrame,
+    osc: pd.Series,
+    lb_left: int = 3,
+    lb_right: int = 1,
+    range_lower: int = 5,
+    range_upper: int = 60,
+) -> pd.DataFrame:
+    """
+    Detect regular and hidden divergences between price and the SPO oscillator.
+    Python translation of the divergence block in the Saty Phase Oscillator
+    with Divergence PineScript (lbL=3, lbR=1, range 5–60 by default).
+
+    Pivot Detection (matches ta.pivotlow / ta.pivothigh):
+      A pivot LOW at bar i: series[i-lbL..i-1] all strictly > series[i]
+      AND series[i+1..i+lbR] all strictly > series[i].
+      Signal fires at bar i+lbR (same confirmation lag as PineScript).
+
+    Range Check (matches _inRange):
+      The gap between consecutive confirmation bars must be [range_lower, range_upper].
+
+    Divergence Types:
+      Regular Bull  : price lower low   + oscillator higher low  → reversal up
+      Regular Bear  : price higher high + oscillator lower high  → reversal down
+      Hidden Bull   : price higher low  + oscillator lower low   → continuation up
+      Hidden Bear   : price lower high  + oscillator higher high → continuation down
+
+    Args:
+        df          : DataFrame with columns high, low (same index as osc)
+        osc         : SPO oscillator Series (calc_spo()['spo'])
+        lb_left     : bars to the left strictly higher/lower (default 3)
+        lb_right    : confirmation lag in bars (default 1)
+        range_lower : min bars between consecutive pivot confirmations (default 5)
+        range_upper : max bars between consecutive pivot confirmations (default 60)
+
+    Returns DataFrame (same index as osc) with boolean columns:
+        bull_div, bear_div, hidden_bull_div, hidden_bear_div
+    """
+    osc_arr  = osc.values.astype(float)
+    low_arr  = df['low'].values.astype(float)
+    high_arr = df['high'].values.astype(float)
+    n        = len(osc_arr)
+
+    # ── Step 1: find all confirmed pivot lows and pivot highs ─────────────────
+    # Each entry: (pivot_bar_index, confirmation_bar_index)
+    pl_list: list = []
+    ph_list: list = []
+
+    for i in range(lb_left, n - lb_right):
+        val = osc_arr[i]
+        if np.isnan(val):
+            continue
+        left  = osc_arr[i - lb_left: i]
+        right = osc_arr[i + 1: i + lb_right + 1]
+        if np.any(np.isnan(left)) or np.any(np.isnan(right)):
+            continue
+
+        if np.all(left > val) and np.all(right > val):
+            pl_list.append((i, i + lb_right))   # pivot low confirmed
+
+        if np.all(left < val) and np.all(right < val):
+            ph_list.append((i, i + lb_right))   # pivot high confirmed
+
+    # ── Step 2: compare consecutive pivot pairs for divergence ────────────────
+    bull_div        = np.zeros(n, dtype=bool)
+    bear_div        = np.zeros(n, dtype=bool)
+    hidden_bull_div = np.zeros(n, dtype=bool)
+    hidden_bear_div = np.zeros(n, dtype=bool)
+
+    for k in range(1, len(pl_list)):
+        piv_prev, conf_prev = pl_list[k - 1]
+        piv_curr, conf_curr = pl_list[k]
+
+        if not (range_lower <= (conf_curr - conf_prev) <= range_upper):
+            continue
+
+        o_prev, o_curr = osc_arr[piv_prev], osc_arr[piv_curr]
+        p_prev, p_curr = low_arr[piv_prev],  low_arr[piv_curr]
+        if np.isnan(o_prev) or np.isnan(o_curr):
+            continue
+
+        if p_curr < p_prev and o_curr > o_prev:   # regular bull
+            bull_div[conf_curr] = True
+        if p_curr > p_prev and o_curr < o_prev:   # hidden bull
+            hidden_bull_div[conf_curr] = True
+
+    for k in range(1, len(ph_list)):
+        piv_prev, conf_prev = ph_list[k - 1]
+        piv_curr, conf_curr = ph_list[k]
+
+        if not (range_lower <= (conf_curr - conf_prev) <= range_upper):
+            continue
+
+        o_prev, o_curr = osc_arr[piv_prev], osc_arr[piv_curr]
+        p_prev, p_curr = high_arr[piv_prev], high_arr[piv_curr]
+        if np.isnan(o_prev) or np.isnan(o_curr):
+            continue
+
+        if p_curr > p_prev and o_curr < o_prev:   # regular bear
+            bear_div[conf_curr] = True
+        if p_curr < p_prev and o_curr > o_prev:   # hidden bear
+            hidden_bear_div[conf_curr] = True
+
+    return pd.DataFrame({
+        'bull_div':        bull_div,
+        'bear_div':        bear_div,
+        'hidden_bull_div': hidden_bull_div,
+        'hidden_bear_div': hidden_bear_div,
+    }, index=osc.index)
