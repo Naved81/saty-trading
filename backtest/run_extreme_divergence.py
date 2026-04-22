@@ -37,10 +37,10 @@ warnings.filterwarnings('ignore')
 
 from config import (
     DIV_LB_LEFT, DIV_LB_RIGHT, DIV_RANGE_MIN, DIV_RANGE_MAX, DIV_TIMEFRAMES,
-    WARMUP_DAYS,
+    WARMUP_DAYS, RTH_START, RTH_END,
 )
 from core.db import get_connection, load_bars, get_available_tickers, get_catalog
-from core.sessions import filter_rth, resample_to
+from core.sessions import filter_eth, filter_rth, resample_to
 from core.indicators import calc_spo, calc_spo_divergence
 
 EXTREME_THRESHOLD = 100.0   # |SPO| must exceed this at the pivot bar
@@ -56,7 +56,7 @@ DIV_LABEL = {
 
 def scan_extreme_divergences(
     ticker: str,
-    df_rth: pd.DataFrame,
+    df_full: pd.DataFrame,
     timeframes: list,
     start: str = None,
     end: str = None,
@@ -67,28 +67,45 @@ def scan_extreme_divergences(
     Each row: ticker, timeframe_min, date, time, div_type,
               osc_value (at pivot), price_level (low or high at pivot)
     """
+    # Use ETH stream so SPO EMAs are continuous (match TradingView)
+    df_eth = filter_eth(df_full)
     all_events = []
 
     for tf_min in timeframes:
-        # Resample RTH 1-min bars to target timeframe
-        df = resample_to(df_rth, rule=f'{tf_min}min')
+        # Resample ETH bars for SPO continuity
+        df_eth_rs = resample_to(df_eth, rule=f'{tf_min}min')
+        if df_eth_rs.empty:
+            continue
+
+        # Skip warmup rows so EMA is stable
+        warmup = max(WARMUP_DAYS, 40)
+        if len(df_eth_rs) <= warmup:
+            continue
+        df_eth_rs = df_eth_rs.iloc[warmup:].reset_index(drop=True)
+
+        # Compute SPO on full ETH resampled series
+        spo_df = calc_spo(df_eth_rs)
+        df_eth_rs = df_eth_rs.copy()
+        df_eth_rs['spo_val'] = spo_df['spo'].values
+
+        # Apply date range filter after SPO (preserves EMA history)
+        if start:
+            df_eth_rs = df_eth_rs[df_eth_rs['timestamp'] >= pd.Timestamp(start)]
+        if end:
+            df_eth_rs = df_eth_rs[df_eth_rs['timestamp'] <= pd.Timestamp(end)]
+        if df_eth_rs.empty:
+            continue
+
+        # Filter to RTH bars for divergence detection
+        rth_mask = (
+            (df_eth_rs['timestamp'].dt.time >= RTH_START) &
+            (df_eth_rs['timestamp'].dt.time <= RTH_END)
+        )
+        df = df_eth_rs[rth_mask].reset_index(drop=True)
         if df.empty:
             continue
 
-        # Date range filter
-        if start:
-            df = df[df['timestamp'] >= pd.Timestamp(start)]
-        if end:
-            df = df[df['timestamp'] <= pd.Timestamp(end)]
-
-        warmup = max(WARMUP_DAYS, 40)
-        if len(df) <= warmup:
-            continue
-        df = df.iloc[warmup:].reset_index(drop=True)
-
-        # Compute SPO
-        spo_df = calc_spo(df)
-        osc    = spo_df['spo']
+        osc = df['spo_val']
 
         # Extract raw pivot data so we can report the actual pivot bar's values
         osc_arr  = osc.values.astype(float)
@@ -257,8 +274,7 @@ def main():
         print(f"    {len(df):,} bars  |  "
               f"{df['timestamp'].min().date()} → {df['timestamp'].max().date()}")
 
-        df_rth = filter_rth(df)
-        events = scan_extreme_divergences(ticker, df_rth, timeframes,
+        events = scan_extreme_divergences(ticker, df, timeframes,
                                           args.start, args.end)
         print_results(events, ticker)
         all_events.append(events)
