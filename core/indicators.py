@@ -342,3 +342,116 @@ def calc_ttm_squeeze(df: pd.DataFrame,
     out['squeeze_started'] = ~no_sqz &  prev_no_sqz   # squeeze begins
 
     return out
+
+
+# ── SPO Divergence ─────────────────────────────────────────────────────────────
+
+def calc_spo_divergence(
+    df: pd.DataFrame,
+    osc: pd.Series,
+    lb_left: int = 3,
+    lb_right: int = 1,
+    range_lower: int = 5,
+    range_upper: int = 60,
+) -> pd.DataFrame:
+    """
+    Detect regular and hidden divergences between price and the SPO oscillator.
+    Python translation of the divergence block in the Saty Phase Oscillator
+    with Divergence PineScript (lbL=3, lbR=1, range 5–60 by default).
+
+    Pivot Detection (matches ta.pivotlow / ta.pivothigh):
+      A pivot LOW at bar i: series[i-lbL..i-1] all strictly > series[i]
+      AND series[i+1..i+lbR] all strictly > series[i].
+      Signal fires at bar i+lbR (same confirmation lag as PineScript).
+
+    Range Check (matches _inRange):
+      The gap between consecutive confirmation bars must be [range_lower, range_upper].
+
+    Divergence Types:
+      Regular Bull  : price lower low   + oscillator higher low  → reversal up
+      Regular Bear  : price higher high + oscillator lower high  → reversal down
+      Hidden Bull   : price higher low  + oscillator lower low   → continuation up
+      Hidden Bear   : price lower high  + oscillator higher high → continuation down
+
+    Args:
+        df          : DataFrame with columns high, low (same index as osc)
+        osc         : SPO oscillator Series (calc_spo()['spo'])
+        lb_left     : bars to the left strictly higher/lower (default 3)
+        lb_right    : confirmation lag in bars (default 1)
+        range_lower : min bars between consecutive pivot confirmations (default 5)
+        range_upper : max bars between consecutive pivot confirmations (default 60)
+
+    Returns DataFrame (same index as osc) with boolean columns:
+        bull_div, bear_div, hidden_bull_div, hidden_bear_div
+    """
+    osc_arr  = osc.values.astype(float)
+    low_arr  = df['low'].values.astype(float)
+    high_arr = df['high'].values.astype(float)
+    n        = len(osc_arr)
+
+    # ── Step 1: find all confirmed pivot lows and pivot highs ─────────────────
+    # Each entry: (pivot_bar_index, confirmation_bar_index)
+    pl_list: list = []
+    ph_list: list = []
+
+    for i in range(lb_left, n - lb_right):
+        val = osc_arr[i]
+        if np.isnan(val):
+            continue
+        left  = osc_arr[i - lb_left: i]
+        right = osc_arr[i + 1: i + lb_right + 1]
+        if np.any(np.isnan(left)) or np.any(np.isnan(right)):
+            continue
+
+        if np.all(left > val) and np.all(right > val):
+            pl_list.append((i, i + lb_right))   # pivot low confirmed
+
+        if np.all(left < val) and np.all(right < val):
+            ph_list.append((i, i + lb_right))   # pivot high confirmed
+
+    # ── Step 2: compare consecutive pivot pairs for divergence ────────────────
+    bull_div        = np.zeros(n, dtype=bool)
+    bear_div        = np.zeros(n, dtype=bool)
+    hidden_bull_div = np.zeros(n, dtype=bool)
+    hidden_bear_div = np.zeros(n, dtype=bool)
+
+    for k in range(1, len(pl_list)):
+        piv_prev, conf_prev = pl_list[k - 1]
+        piv_curr, conf_curr = pl_list[k]
+
+        if not (range_lower <= (conf_curr - conf_prev) <= range_upper):
+            continue
+
+        o_prev, o_curr = osc_arr[piv_prev], osc_arr[piv_curr]
+        p_prev, p_curr = low_arr[piv_prev],  low_arr[piv_curr]
+        if np.isnan(o_prev) or np.isnan(o_curr):
+            continue
+
+        if p_curr < p_prev and o_curr > o_prev:   # regular bull
+            bull_div[conf_curr] = True
+        if p_curr > p_prev and o_curr < o_prev:   # hidden bull
+            hidden_bull_div[conf_curr] = True
+
+    for k in range(1, len(ph_list)):
+        piv_prev, conf_prev = ph_list[k - 1]
+        piv_curr, conf_curr = ph_list[k]
+
+        if not (range_lower <= (conf_curr - conf_prev) <= range_upper):
+            continue
+
+        o_prev, o_curr = osc_arr[piv_prev], osc_arr[piv_curr]
+        p_prev, p_curr = high_arr[piv_prev], high_arr[piv_curr]
+        if np.isnan(o_prev) or np.isnan(o_curr):
+            continue
+
+        if p_curr > p_prev and o_curr < o_prev:   # regular bear
+            bear_div[conf_curr] = True
+        if p_curr < p_prev and o_curr > o_prev:   # hidden bear
+            hidden_bear_div[conf_curr] = True
+
+    return pd.DataFrame({
+        'bull_div':        bull_div,
+        'bear_div':        bear_div,
+        'hidden_bull_div': hidden_bull_div,
+        'hidden_bear_div': hidden_bear_div,
+    }, index=osc.index)
