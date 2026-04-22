@@ -91,6 +91,20 @@ BB_SPO_MIN              = 10.0  # minimum |SPO| to confirm breakout direction
 BB_STOP_ATR_MULT        = 0.30  # stop distance = this × prev_atr_rth from entry
 BB_ENTRY_CUTOFF         = '14:00'  # no new entries at or after 2:00 PM ET
 
+# ── TTM Squeeze parameters ───────────────────────────────────────────────────
+# Matches Beardy Squeeze Pro PineScript defaults exactly.
+
+TTM_LENGTH       = 20     # lookback for all BB / KC / momentum components
+TTM_BB_MULT      = 2.0    # Bollinger Band std multiplier
+TTM_KC_MULT_HIGH = 1.0    # Keltner Channel inner multiplier  (orange dot)
+TTM_KC_MULT_MID  = 1.5    # Keltner Channel mid multiplier    (red dot)
+TTM_KC_MULT_LOW  = 2.0    # Keltner Channel outer multiplier  (black dot)
+
+# Intraday breakout strategy using TTM Squeeze
+TTM_SQUEEZE_MIN_BARS = 5     # min bars in squeeze before a fire counts
+TTM_STOP_ATR_MULT    = 0.30  # stop distance = this × prev_atr_rth from entry
+TTM_ENTRY_CUTOFF     = '14:00'  # no new entries at or after 2:00 PM ET
+
 # ── Telegram ──────────────────────────────────────────────────────────────────
 
 TELEGRAM_BOT_TOKEN = os.environ.get('TELEGRAM_BOT_TOKEN')

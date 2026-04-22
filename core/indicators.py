@@ -15,6 +15,7 @@ Key design:
 
 import pandas as pd
 import numpy as np
+from numpy.lib.stride_tricks import sliding_window_view
 
 
 # ── ATR ───────────────────────────────────────────────────────────────────────
@@ -200,3 +201,144 @@ def build_daily_reference(df_full: pd.DataFrame,
     daily  = pd.concat([daily, ribbon[['bullish','bearish']]], axis=1)
 
     return daily
+
+
+# ── TTM Squeeze helpers ───────────────────────────────────────────────────────
+
+def _rolling_linreg_end(series: pd.Series, length: int) -> pd.Series:
+    """
+    Vectorised rolling linear regression — returns the fitted value at the
+    LAST point of each window (equivalent to ta.linreg(series, length, 0)
+    in PineScript).
+
+    Uses numpy sliding_window_view for speed; handles NaN rows gracefully.
+    """
+    arr = series.values.astype(float)
+    n   = len(arr)
+    if n < length:
+        return pd.Series(np.nan, index=series.index)
+
+    x     = np.arange(length, dtype=float)
+    x_bar = (length - 1) / 2.0
+    ss_xx = ((x - x_bar) ** 2).sum()
+
+    windows  = sliding_window_view(arr, length)          # (n-length+1, length)
+    nan_mask = np.any(np.isnan(windows), axis=1)         # rows with any NaN
+
+    y_bar = np.where(nan_mask, np.nan, windows.mean(axis=1))
+
+    delta_y = np.where(nan_mask[:, None], np.nan, windows - y_bar[:, None])
+    ss_xy   = np.where(nan_mask, np.nan, ((x - x_bar) * delta_y).sum(axis=1))
+
+    b    = ss_xy / ss_xx
+    a    = y_bar - b * x_bar
+    vals = a + b * (length - 1)
+
+    out             = np.full(n, np.nan)
+    out[length - 1:] = vals
+    return pd.Series(out, index=series.index)
+
+
+# ── TTM Squeeze ───────────────────────────────────────────────────────────────
+
+def calc_ttm_squeeze(df: pd.DataFrame,
+                     length: int = 20,
+                     bb_mult: float = 2.0,
+                     kc_mult_high: float = 1.0,
+                     kc_mult_mid: float = 1.5,
+                     kc_mult_low: float = 2.0) -> pd.DataFrame:
+    """
+    TTM Squeeze — Python translation of the Beardy Squeeze Pro PineScript.
+
+    Squeeze state: Bollinger Bands compressed inside Keltner Channels.
+    Three KC levels reveal squeeze intensity (high/mid/low).
+    Momentum oscillator: linreg of (close − midrange/SMA anchor).
+
+    Keltner Channel uses SMA of True Range (not Wilder ATR), matching
+    the PineScript  devKC = ta.sma(ta.tr, length)  exactly.
+
+    Args:
+        df           : DataFrame with columns high, low, close
+        length       : lookback for all components (default 20)
+        bb_mult      : BB standard-deviation multiplier (default 2.0)
+        kc_mult_high : inner KC multiplier  — orange dot (default 1.0)
+        kc_mult_mid  : middle KC multiplier — red dot   (default 1.5)
+        kc_mult_low  : outer KC multiplier  — black dot (default 2.0)
+
+    Returns DataFrame with columns:
+        bb_basis, bb_upper, bb_lower
+        kc_basis, kc_upper/lower_high/mid/low
+        no_sqz          : bool — BB extends outside outer KC  (green dot)
+        squeeze_state   : 'none' | 'low' | 'mid' | 'high'
+        in_squeeze      : bool — any squeeze level active (not no_sqz)
+        momentum        : float — linreg oscillator
+        mom_up          : bool — momentum rising vs prior bar
+        squeeze_fired   : bool — transition squeeze → no squeeze
+        squeeze_started : bool — transition no squeeze → squeeze
+    """
+    out = pd.DataFrame(index=df.index)
+
+    # ── Bollinger Bands (SMA + sample stdev) ──
+    sma            = df['close'].rolling(length, min_periods=length).mean()
+    stdev          = df['close'].rolling(length, min_periods=length).std()
+    out['bb_basis'] = sma
+    out['bb_upper'] = sma + bb_mult * stdev
+    out['bb_lower'] = sma - bb_mult * stdev
+
+    # ── Keltner Channels (SMA of True Range — matches PineScript) ──
+    tr = pd.concat([
+        df['high'] - df['low'],
+        (df['high'] - df['close'].shift(1)).abs(),
+        (df['low']  - df['close'].shift(1)).abs(),
+    ], axis=1).max(axis=1)
+    kc_dev = tr.rolling(length, min_periods=length).mean()
+
+    out['kc_basis']      = sma   # shared with BB
+    out['kc_upper_high'] = sma + kc_mult_high * kc_dev
+    out['kc_lower_high'] = sma - kc_mult_high * kc_dev
+    out['kc_upper_mid']  = sma + kc_mult_mid  * kc_dev
+    out['kc_lower_mid']  = sma - kc_mult_mid  * kc_dev
+    out['kc_upper_low']  = sma + kc_mult_low  * kc_dev
+    out['kc_lower_low']  = sma - kc_mult_low  * kc_dev
+
+    # ── Squeeze conditions (OR logic — exact PineScript translation) ──
+    # no_sqz  : at least one BB band outside the outermost KC → expanding
+    # high_sqz: at least one BB band inside the innermost KC  → tightest coil
+    no_sqz   = ((out['bb_lower'] <  out['kc_lower_low']) |
+                (out['bb_upper'] >  out['kc_upper_low']))
+    low_sqz  = ((out['bb_lower'] >= out['kc_lower_low']) |
+                (out['bb_upper'] <= out['kc_upper_low']))
+    mid_sqz  = ((out['bb_lower'] >= out['kc_lower_mid']) |
+                (out['bb_upper'] <= out['kc_upper_mid']))
+    high_sqz = ((out['bb_lower'] >= out['kc_lower_high']) |
+                (out['bb_upper'] <= out['kc_upper_high']))
+
+    out['no_sqz']    = no_sqz
+    out['in_squeeze'] = ~no_sqz
+
+    # Dot colour priority: high > mid > low > none  (mirrors PineScript ternary)
+    state = pd.Series('none', index=df.index)
+    state[low_sqz]  = 'low'
+    state[mid_sqz]  = 'mid'
+    state[high_sqz] = 'high'
+    out['squeeze_state'] = state
+
+    # ── Momentum oscillator ──
+    # mom = linreg(close − avg(avg(highest, lowest), sma), length, 0)
+    highest  = df['high'].rolling(length, min_periods=length).max()
+    lowest   = df['low'].rolling(length, min_periods=length).min()
+    midrange = (highest + lowest) / 2.0
+    anchor   = (midrange + sma) / 2.0
+    delta    = df['close'] - anchor
+
+    out['momentum'] = _rolling_linreg_end(delta, length)
+    out['mom_up']   = out['momentum'] > out['momentum'].shift(1)
+
+    # ── State transitions (for alerts and strategy entry) ──
+    # shift(1) produces float NaN on the first row; fillna(True) → "was no-squeeze"
+    # so the first bar never falsely fires as a squeeze_started event.
+    prev_no_sqz            = no_sqz.shift(1).fillna(True).astype(bool)
+    out['squeeze_fired']   = no_sqz  & ~prev_no_sqz   # squeeze releases
+    out['squeeze_started'] = ~no_sqz &  prev_no_sqz   # squeeze begins
+
+    return out
