@@ -23,7 +23,6 @@ env/
 
 # Data files
 data/
-*.csv
 *.gz
 *.parquet
 
