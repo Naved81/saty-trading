@@ -83,6 +83,14 @@ MAX_RETRIES    = 4
 RETRY_BASE_SEC = 2
 REQUEST_DELAY  = 0.25
 
+# ── BB Compression Breakout parameters ───────────────────────────────────────
+
+BB_COMPRESSION_LOOKBACK = 15    # 1-min bars to look back for compression history
+BB_COMPRESSION_MIN_BARS = 7     # min compressed bars required in that window
+BB_SPO_MIN              = 10.0  # minimum |SPO| to confirm breakout direction
+BB_STOP_ATR_MULT        = 0.30  # stop distance = this × prev_atr_rth from entry
+BB_ENTRY_CUTOFF         = '14:00'  # no new entries at or after 2:00 PM ET
+
 # ── Telegram ──────────────────────────────────────────────────────────────────
 
 TELEGRAM_BOT_TOKEN = os.environ.get('TELEGRAM_BOT_TOKEN')
