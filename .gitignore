@@ -24,7 +24,6 @@ env/
 # Data files — exclude downloaded files but keep scripts
 data/
 !data/*.py
-*.csv
 *.gz
 *.parquet
 
