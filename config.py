@@ -40,6 +40,13 @@ POST_END   = pd.Timestamp('20:00').time()   # afterhours close
 
 DEFAULT_TICKERS = ['SPY', 'QQQ', 'IWM', 'GLD', 'TLT']
 
+# Top 20 US stocks by market cap — used for daily compression backtest
+TOP20_TICKERS = [
+    'AAPL', 'MSFT', 'NVDA', 'AMZN', 'GOOGL', 'META', 'TSLA', 'AVGO',
+    'LLY',  'JPM',  'V',    'UNH',  'XOM',   'WMT',  'MA',   'NFLX',
+    'COST', 'JNJ',  'PG',   'AMD',
+]
+
 # ── Database timeframes ───────────────────────────────────────────────────────
 # (label, API multiplier, API timespan, session)
 DEFAULT_TIMEFRAMES = [
@@ -115,6 +122,15 @@ TTM_KC_MULT_LOW  = 2.0    # Keltner Channel outer multiplier  (black dot)
 TTM_SQUEEZE_MIN_BARS = 5     # min bars in squeeze before a fire counts
 TTM_STOP_ATR_MULT    = 0.30  # stop distance = this × prev_atr_rth from entry
 TTM_ENTRY_CUTOFF     = '14:00'  # no new entries at or after 2:00 PM ET
+
+# ── Daily Compression Break parameters ───────────────────────────────────────
+# Saty's 0-5 Candle Compression Break — daily timeframe setup.
+
+DAILY_COMP_MAX_CANDLES = 5     # max consecutive compression candles to accumulate
+DAILY_COMP_MIN_CANDLES = 1     # minimum compression candles needed (skip 1-bar noise)
+DAILY_COMP_MAX_WATCH   = 3     # bars to wait for range break after compression ends
+DAILY_COMP_MAX_HOLD    = 30    # max calendar days to hold a trade before closing at market
+DAILY_COMP_TARGET_R    = 2.0   # profit target in R-multiples (risk = range height)
 
 # ── Telegram ──────────────────────────────────────────────────────────────────
 
