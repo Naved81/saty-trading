@@ -1,0 +1,100 @@
+//@version=6
+indicator(title = 'Traffic Signal Divergence Indicator for The Saty PO by TenAMTrader', format = format.price, overlay = true, timeframe = '')
+// A Diverence indicator that can be applied to The Saty Phase Oscillator, and plotted on price.
+// Usage:
+// Add Saty Phase Oscillator to your chart.
+// Then add this indicator "TenAM's Traffic Light Divergence Indicator for The Saty Phase Oscillator" to your indictors.
+// VERY IMPORTANT Click the indicator drop down in settings of teh Traffic Light Divergence Indicator and make sure to choose Saty Phase Osillator: Phase Oscillator
+// Click the settings on this indicator and make sure the source is set to plot on price.
+// You can choose to have it spot regular as well as hidden divergences.
+// For the right and left pivot look backs the overall recommendation is Right Lookback 3 and Left Lookback 1 however it is best to back test different look backs based on timeframe and stock that you are charting.
+// For the Max Lookback Range it defaults to 60 and the Min Look Back range to 0. However once again best to back test for your best settings.
+// Watch for it to plot divergences and give you the ?? or ?? signal. Or for Hidden Divergences a ?? will appear. These are not buy and sell signals, they are possible entries points based on divergences.
+
+overlay_main = input(true, title = 'Plot on price (rather than on indicator)')
+osc = input(ohlc4, title = 'Indicator')
+lbR = input(title = 'Pivot Lookback Right', defval = 3)
+lbL = input(title = 'Pivot Lookback Left', defval = 1)
+rangeUpper = input(title = 'Max of Lookback Range', defval = 60)
+rangeLower = input(title = 'Min of Lookback Range', defval = 0)
+plotBull = input(title = 'Plot Bullish', defval = true)
+plotHiddenBull = input(title = 'Plot Hidden Bullish', defval = true)
+plotBear = input(title = 'Plot Bearish', defval = true)
+plotHiddenBear = input(title = 'Plot Hidden Bearish', defval = true)
+delay_plot_til_closed = input(title = 'Delay plot until candle is closed (don\'t repaint)', defval = false)
+bearColor = color.rgb(0, 0, 0)
+bullColor = color.rgb(0, 0, 0)
+hiddenBullColor = color.new(color.yellow, 100)
+hiddenBearColor = color.new(color.yellow, 100)
+textColor = color.black
+noneColor = color.new(color.white, 100)
+
+repaint = not delay_plot_til_closed or barstate.ishistory or barstate.isconfirmed
+
+plFound = na(ta.pivotlow(osc, lbL, lbR)) ? false : true
+phFound = na(ta.pivothigh(osc, lbL, lbR)) ? false : true
+_inRange(cond) =>
+    bars = ta.barssince(cond == true)
+    rangeLower <= bars and bars <= rangeUpper
+
+//------------------------------------------------------------------------------
+// Regular Bullish
+// Osc: Higher Low
+
+oscHL = osc[lbR] > ta.valuewhen(plFound, osc[lbR], 1) and _inRange(plFound[1])
+
+// Price: Lower Low
+
+priceLL = low[lbR] < ta.valuewhen(plFound, low[lbR], 1)
+bullCond = plotBull and priceLL and oscHL and plFound and repaint
+
+plot(plFound ? overlay_main ? low[lbR] : osc[lbR] : na, offset = -lbR, title = 'Regular Bullish Signal', linewidth = 1, color = bullCond ? bullColor : noneColor)
+
+plotshape(bullCond ? overlay_main ? low[lbR] : osc[lbR] : na, offset = -lbR, title = 'Regular Bullish Signal Label', text = ' ?? ', style = shape.labelup, location = location.absolute, color = color.new(bullColor, 100), textcolor = color.new(textColor, 0))
+
+//------------------------------------------------------------------------------
+// Hidden Bullish
+// Osc: Lower Low
+
+oscLL = osc[lbR] < ta.valuewhen(plFound, osc[lbR], 1) and _inRange(plFound[1])
+
+// Price: Higher Low
+
+priceHL = low[lbR] > ta.valuewhen(plFound, low[lbR], 1)
+hiddenBullCond = plotHiddenBull and priceHL and oscLL and plFound and repaint
+
+plot(plFound ? overlay_main ? low[lbR] : osc[lbR] : na, offset = -lbR, title = 'Hidden Bullish Signal', linewidth = math.max(1, 0), color = hiddenBullCond ? hiddenBullColor : noneColor)
+
+plotshape(hiddenBullCond ? overlay_main ? low[lbR] : osc[lbR] : na, offset = -lbR, title = 'Hidden Bullish Signal Label', text = ' ?? ', style = shape.labelup, location = location.absolute, color = color.new(bullColor, 100), textcolor = color.new(textColor, 0))
+
+//------------------------------------------------------------------------------
+// Regular Bearish
+// Osc: Lower High
+
+oscLH = osc[lbR] < ta.valuewhen(phFound, osc[lbR], 1) and _inRange(phFound[1])
+
+// Price: Higher High
+
+priceHH = high[lbR] > ta.valuewhen(phFound, high[lbR], 1)
+
+bearCond = plotBear and priceHH and oscLH and phFound and repaint
+
+plot(phFound ? overlay_main ? high[lbR] : osc[lbR] : na, offset = -lbR, title = 'Regular Bearish Signal', linewidth = 1, color = bearCond ? bearColor : noneColor)
+
+plotshape(bearCond ? overlay_main ? high[lbR] : osc[lbR] : na, offset = -lbR, title = 'Regular Bearish Signal Label', text = ' ?? ', style = shape.labeldown, location = location.absolute, color = color.new(bearColor, 100), textcolor = color.new(textColor, 0))
+
+//------------------------------------------------------------------------------
+// Hidden Bearish
+// Osc: Higher High
+
+oscHH = osc[lbR] > ta.valuewhen(phFound, osc[lbR], 1) and _inRange(phFound[1])
+
+// Price: Lower High
+
+priceLH = high[lbR] < ta.valuewhen(phFound, high[lbR], 1)
+
+hiddenBearCond = plotHiddenBear and priceLH and oscHH and phFound and repaint
+
+plot(phFound ? overlay_main ? high[lbR] : osc[lbR] : na, offset = -lbR, title = 'Hidden Bearish Signal', linewidth = math.max(1, 0), color = hiddenBearCond ? hiddenBearColor : noneColor)
+
+plotshape(hiddenBearCond ? overlay_main ? high[lbR] : osc[lbR] : na, offset = -lbR, title = 'Hidden Bearish Signal Label', text = ' ?? ', style = shape.labeldown, location = location.absolute, color = color.new(bearColor, 100), textcolor = color.new(textColor, 0))

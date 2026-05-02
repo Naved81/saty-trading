@@ -1,0 +1,125 @@
+// Saty Phase Oscillator
+// Copyright (C) 2022-2024 Saty Mahajan
+// A useful range-based signal to monitor various phases of the market.
+
+//@version=6
+indicator('Saty Phase Oscillator with Divergence')
+
+show_label = input(true, 'Show Label')
+show_zone_crosses = input(true, 'Show Zone Crosses')
+show_extreme_crosses = input(true, 'Show Extreme Crosses')
+
+// Standard Colors
+green = color.rgb(0, 255, 0)
+red = color.rgb(255, 0, 0)
+magenta = color.rgb(255, 0, 255)
+light_gray = color.rgb(200, 200, 200)
+gray = color.rgb(150, 150, 150)
+dark_gray = color.rgb(100, 100, 100)
+yellow = color.rgb(255, 255, 0)
+
+// Pivot Data
+pivot = ta.ema(close, 21)
+above_pivot = close >= pivot
+
+// Phases
+extended_up_zone = plot(100.0, color = light_gray, linewidth = 1, display = display.all - display.price_scale)
+distribution_zone = plot(61.8, color = gray, linewidth = 1, display = display.all - display.price_scale)
+neutral_up_zone = plot(23.6, color = dark_gray, linewidth = 1, display = display.all - display.price_scale)
+neutral_down_zone = plot(-23.6, color = dark_gray, linewidth = 1, display = display.all - display.price_scale)
+accumulation_zone = plot(-61.8, color = gray, linewidth = 1, display = display.all - display.price_scale)
+extended_down_zone = plot(-100.0, color = light_gray, linewidth = 1, display = display.all - display.price_scale)
+
+// # Bollinger Band Compression Signal
+bband_offset = 2.0 * ta.stdev(close, 21)
+bband_up = pivot + bband_offset
+bband_down = pivot - bband_offset
+compression_threshold_up = pivot + 2.0 * ta.atr(14)
+compression_threshold_down = pivot - 2.0 * ta.atr(14)
+expansion_threshold_up = pivot + 1.854 * ta.atr(14)
+expansion_threshold_down = pivot - 1.854 * ta.atr(14)
+compression = above_pivot ? bband_up - compression_threshold_up : compression_threshold_down - bband_down
+in_expansion_zone = above_pivot ? bband_up - expansion_threshold_up : expansion_threshold_down - bband_down
+expansion = compression[1] <= compression[0]
+compression_tracker = false
+if expansion and in_expansion_zone > 0
+    compression_tracker := false
+    compression_tracker
+else if compression <= 0
+    compression_tracker := true
+    compression_tracker
+else
+    compression_tracker := false
+    compression_tracker
+compression_signal = plot(0, color = compression_tracker ? magenta : dark_gray, linewidth = 2, display = display.all - display.price_scale)
+
+// # Compressing / Expanding / Expanded
+var tbl = table.new(position.top_right, 1, 1)
+if barstate.islast
+    table.cell(tbl, 0, 0, 'Compression', bgcolor = magenta)
+if compression_tracker == false
+    table.clear(tbl, 0, 0, 0, 0)
+
+// Saty Phase Oscillator Signal
+raw_signal = (close - pivot) / (3.0 * ta.atr(14)) * 100
+oscillator = ta.ema(raw_signal, 3)
+phase_oscillator = plot(oscillator, linewidth = 2, color = compression_tracker ? magenta : oscillator >= 0.0 ? green : red, title = 'Phase Oscillator')
+
+// Mean Reversion PO Crossover Signals
+leaving_accumulation = oscillator[1] <= -61.8 and oscillator > -61.8
+leaving_extreme_down = oscillator[1] <= -100 and oscillator > -100
+leaving_distribution = oscillator[1] >= 61.8 and oscillator < 61.8
+leaving_extreme_up = oscillator[1] >= 100 and oscillator < 100
+plot(show_zone_crosses and leaving_accumulation ? oscillator[1] - 30 : na, title = 'Leaving Accumulation', style = plot.style_circles, color = yellow, linewidth = 2, display = display.all - display.price_scale)
+plot(show_extreme_crosses and leaving_extreme_down ? oscillator[1] - 30 : na, title = 'Leaving Extreme Down', style = plot.style_circles, color = yellow, linewidth = 2, display = display.all - display.price_scale)
+plot(show_zone_crosses and leaving_distribution ? oscillator[1] + 30 : na, title = 'Leaving Distribution', style = plot.style_circles, color = yellow, linewidth = 2, display = display.all - display.price_scale)
+plot(show_extreme_crosses and leaving_extreme_up ? oscillator[1] + 30 : na, title = 'Leaving Extreme Up', style = plot.style_circles, color = yellow, linewidth = 2, display = display.all - display.price_scale)
+
+// Divergence
+plotBull = input(title = 'Bullish', defval = true, inline = 'A', group = 'Divergence Plots')
+plotBear = input(title = 'Bearish', defval = true, inline = 'A', group = 'Divergence Plots')
+plotHiddenBull = input(title = 'Hidden Bull', defval = false, inline = 'B', group = 'Divergence Plots')
+plotHiddenBear = input(title = 'Hidden Bear', defval = false, inline = 'B', group = 'Divergence Plots')
+lbR = input(title = 'Pivot Lookback Right', defval = 1)
+lbL = input(title = 'Pivot Lookback Left', defval = 3)
+rangeUpper = input(title = 'Max of Lookback Range', defval = 60)
+rangeLower = input(title = 'Min of Lookback Range', defval = 5)
+
+_inRange(cond) =>
+    bars = ta.barssince(cond == true)
+    rangeLower <= bars and bars <= rangeUpper
+
+plFound = na(ta.pivotlow(oscillator, lbL, lbR)) ? false : true
+phFound = na(ta.pivothigh(oscillator, lbL, lbR)) ? false : true
+oscHL = oscillator[lbR] > ta.valuewhen(plFound, oscillator[lbR], 1) and _inRange(plFound[1])
+oscLL = oscillator[lbR] < ta.valuewhen(plFound, oscillator[lbR], 1) and _inRange(plFound[1])
+oscHH = oscillator[lbR] > ta.valuewhen(phFound, oscillator[lbR], 1) and _inRange(phFound[1])
+oscLH = oscillator[lbR] < ta.valuewhen(phFound, oscillator[lbR], 1) and _inRange(phFound[1])
+priceLL = low[lbR] < ta.valuewhen(plFound, low[lbR], 1)
+priceHL = low[lbR] > ta.valuewhen(plFound, low[lbR], 1)
+priceHH = high[lbR] > ta.valuewhen(phFound, high[lbR], 1)
+priceLH = high[lbR] < ta.valuewhen(phFound, high[lbR], 1)
+bullCond = plotBull and priceLL and oscHL and plFound
+hiddenBullCond = plotHiddenBull and priceHL and oscLL and plFound
+bearCond = plotBear and priceHH and oscLH and phFound
+hiddenBearCond = plotHiddenBear and priceLH and oscHH and phFound
+
+// Divergence Colors
+bearColor = red
+bullColor = green
+hiddenBullColor = color.new(green, 0)
+hiddenBearColor = color.new(red, 0)
+textColor = color.white
+noneColor = color.new(color.white, 100)
+
+plot(plFound ? oscillator[lbR] : na, offset = -lbR, title = 'Regular Bullish', linewidth = 2, color = bullCond ? bullColor : noneColor, display = display.all - display.price_scale)
+plot(plFound ? oscillator[lbR] : na, offset = -lbR, title = 'Hidden Bullish', linewidth = 2, color = hiddenBullCond ? hiddenBullColor : noneColor, display = display.all - display.price_scale)
+plot(phFound ? oscillator[lbR] : na, offset = -lbR, title = 'Regular Bearish', linewidth = 2, color = bearCond ? bearColor : noneColor, display = display.all - display.price_scale)
+plot(phFound ? oscillator[lbR] : na, offset = -lbR, title = 'Hidden Bearish', linewidth = 2, color = hiddenBearCond ? hiddenBearColor : noneColor, display = display.all - display.price_scale) //}
+
+// Divergence Alerts
+alertcondition(bullCond, title = 'Bullish Divergence', message = 'Bullish Divergence')
+alertcondition(hiddenBullCond, title = 'Hidden Bull Divergence', message = 'Hidden Bull Divergence')
+alertcondition(bearCond, title = 'Bearish Divergence', message = 'Bearish Divergence')
+alertcondition(hiddenBearCond, title = 'Hidden Bear Divergence', message = 'Hidden Bearish Divergence')
+
