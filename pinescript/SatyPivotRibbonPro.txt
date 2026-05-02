@@ -1,0 +1,204 @@
+// Saty Pivot Ribbon Pro
+// Copyright (C) 2022-2026 Saty Mahajan
+//
+// A Moving Average Ribbon system that simplifies measuring and using Moving Averages for trend and support/resistance.
+// Special thanks to Ripster for his education and EMA Clouds which inspired this indicator. 
+
+//@version=5
+indicator('Saty Pivot Ribbon Pro', 'Saty Pivot Ribbon Pro', overlay=true)
+
+// Saty Color Theme
+saty_green = color.rgb(0, 255, 30)
+saty_blue = color.rgb(0, 185, 255)
+saty_red = color.rgb(255, 0, 0)
+saty_orange = color.rgb(255, 150, 0)
+saty_yellow = color.rgb(255,255,0)
+saty_violet = color.rgb(150, 100, 255)
+saty_purple = color.rgb(150, 0, 150)
+saty_pink = color.rgb(255, 0, 255)
+saty_white = color.rgb(255, 255, 255)
+saty_light_gray = color.rgb(200,200,200)
+saty_gray = color.rgb(150,150,150)
+saty_dark_gray = color.rgb(100,100,100)
+saty_black = color.rgb(0, 0, 0)
+
+// Settings
+time_warp = input.string("off", 'Time Warp', options=["off", "1m", "2m", "3m", "4m", "5m", "10m", "15m", "20m", "30m", "1h", "2h", "4h", "D", "W", "M", "Y"])
+
+fast_ema = input(title='Fast EMA Length', defval=8)
+show_fast_ema_highlight = input(false, 'Show Fast EMA Highlight')
+fast_ema_highlight_color = input(saty_white, 'Fast EMA Highlight Color')
+
+show_pullback_overlap = input(true, 'Show Pullback Overlap')
+pullback_overlap_ema = input(title='Pullback Overlap EMA Length',defval=13)
+show_pullback_overlap_ema_highlight = input(false, 'Show Pullback EMA Highlight')
+pullback_overlap_ema_highlight_color = input(saty_white, 'Pullback EMA Highlight Color')
+
+pivot_ema = input(title='Pivot EMA Length', defval=21)
+show_pivot_ema_highlight = input(true, 'Show Pivot EMA Highlight')
+pivot_ema_highlight_color = input(saty_white, 'Pivot EMA Highlight Color')
+show_pivot_bias = input(true, 'Show Pivot Bias')
+pivot_bias_ema = input(title = 'Pivot Bias EMA Length', defval=8)
+
+slow_ema = input(title='Slow EMA Length', defval=48)
+show_slow_ema_highlight = input(false, 'Show Slow EMA Highlight')
+slow_ema_highlight_color = input(saty_white, 'Slow EMA Highlight Color')
+
+show_long_term_ema = input(true, 'Show Long-Term EMA')
+long_term_ema = input(title='Long-term EMA Length', defval=200)
+show_long_term_bias = input(true, 'Show Long-term Bias')
+long_term_bias_ema = input(title = 'Long-term Bias EMA Length', defval=21)
+
+show_candle_bias = input(true, "Show Candle Bias")
+bias_ema = input(48, 'Bias EMA')
+candle_up_color = input(saty_green, "Candle Up Color")
+candle_down_color = input(saty_red, "Candle Down Color")
+candle_down_bullish_bias_color = input(saty_blue, "Candle Down Bullish Bias Color")
+candle_up_bearish_bias_color = input(saty_orange, "Candle Up Bearish Bias Color")
+
+
+show_candle_bias_compression_candles = input(true, "Show Candle Bias Compression Candles")
+compression_colors = input.string("Clean", 'Compression Color', options=["Clean", "Classic"])
+
+bullish_fast_cloud_color = input(color.green, 'Bullish Fast Cloud Color')
+bearish_fast_cloud_color = input(color.red, 'Bearish Fast Cloud Color')
+bullish_slow_cloud_color = input(color.aqua, 'Bullish Slow Cloud Color')
+bearish_slow_cloud_color = input(color.orange, 'Bearish Slow Cloud Color')
+cloud_transparency = input(title='Cloud Transparency (0-100)', defval=60)
+
+show_conviction_arrows = input(true, 'Show Conviction Arrows')
+bullish_conviction_color = input(saty_white, 'Bullish Conviction Arrow Color')
+bearish_conviction_color = input(saty_white, 'Bearish Conviction Arrow Color')
+show_fast_conviction_ema = input(false, 'Show Fast Conviction EMA')
+fast_conviction_ema = input(13, 'Fast Conviction EMA Length')
+fast_conviction_ema_color = input(saty_light_gray, 'Fast Conviction EMA Color')
+show_slow_conviction_ema = input(false, 'Show Slow Conviction EMA')
+slow_conviction_ema = input(48, 'Slow Conviction EMA Length')
+slow_conviction_ema_color = input(saty_purple, 'Slow Conviction EMA Color')
+
+// Time Warp timeframe
+// Set the appropriate timeframe based on trading mode
+timeframe_func() =>
+    timeframe = timeframe.period 
+    if time_warp == 'off'
+        timeframe := timeframe.period
+    else if time_warp == '1m'
+        timeframe := '1'
+    else if time_warp == '2m'
+        timeframe := '2'
+    else if time_warp == '3m'
+        timeframe := '3'
+    else if time_warp == '4m'
+        timeframe := '4'
+    else if time_warp == '5m'
+        timeframe := '5'
+    else if time_warp == '10m'
+        timeframe := '10'
+    else if time_warp == '15m'
+        timeframe := '15'
+    else if time_warp == '20m'
+        timeframe := '20'
+    else if time_warp == '30m'
+        timeframe := '30'
+    else if time_warp == '1h'
+        timeframe := '60'
+    else if time_warp == '2h'
+        timeframe := '120'
+    else if time_warp == '4h'
+        timeframe := '240'
+    else if time_warp == 'D'
+        timeframe := 'D'
+    else if time_warp == 'W'
+        timeframe := 'W'
+    else if time_warp == 'M'
+        timeframe := 'M'
+    else if time_warp == 'Y'
+        timeframe := '12M'
+    else
+        timeframe := timeframe.period
+
+// Calculations
+ticker = ticker.new(syminfo.prefix, syminfo.ticker)
+price = request.security(ticker, timeframe_func(), close, gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_on)
+fast_ema_value = request.security(syminfo.tickerid, timeframe_func(), ta.ema(price, fast_ema)[barstate.isrealtime ? 1 : 0], gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off)
+pullback_overlap_ema_value = request.security(syminfo.tickerid, timeframe_func(), ta.ema(price, pullback_overlap_ema)[barstate.isrealtime ? 1 : 0], gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off)
+pivot_ema_value = request.security(syminfo.tickerid, timeframe_func(), ta.ema(price, pivot_ema)[barstate.isrealtime ? 1 : 0], gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off)
+pivot_bias_ema_value = request.security(syminfo.tickerid, timeframe_func(), ta.ema(price, pivot_bias_ema)[barstate.isrealtime ? 1 : 0], gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off)
+slow_ema_value = request.security(syminfo.tickerid, timeframe_func(), ta.ema(price, slow_ema)[barstate.isrealtime ? 1 : 0], gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off)
+long_term_ema_value = request.security(syminfo.tickerid, timeframe_func(), ta.ema(price, long_term_ema)[barstate.isrealtime ? 1 : 0], gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off)
+long_term_bias_ema_value = request.security(syminfo.tickerid, timeframe_func(), ta.ema(price, long_term_bias_ema)[barstate.isrealtime ? 1 : 0], gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off)
+fast_conviction_ema_value = request.security(syminfo.tickerid, timeframe_func(), ta.ema(price, fast_conviction_ema)[barstate.isrealtime ? 1 : 0], gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off)
+slow_conviction_ema_value = request.security(syminfo.tickerid, timeframe_func(), ta.ema(price, slow_conviction_ema)[barstate.isrealtime ? 1 : 0], gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off)
+
+// Create plots
+fast_ema_plot = plot(fast_ema_value, color=show_fast_ema_highlight ? fast_ema_highlight_color : na, title='Fast EMA')
+pullback_overlap_ema_plot = plot(pullback_overlap_ema_value, color=(show_pullback_overlap_ema_highlight and show_pullback_overlap) ? pullback_overlap_ema_highlight_color : na, title='Pullback Overlap EMA')
+pivot_ema_bias_color = show_pivot_bias ? (pivot_bias_ema_value >= pivot_ema_value ? saty_green : saty_red) : pivot_ema_highlight_color
+pivot_ema_plot = plot(pivot_ema_value, color=show_pivot_ema_highlight ? pivot_ema_bias_color : na, title='Pivot EMA')
+slow_ema_plot = plot(slow_ema_value, color=show_slow_ema_highlight ? slow_ema_highlight_color : na, title='Slow EMA')
+long_term_ema_bias_color = show_long_term_bias ? (long_term_bias_ema_value >= long_term_ema_value ? saty_blue : saty_orange) : saty_white
+long_term_ema_plot = plot(long_term_ema_value, color=show_long_term_ema ? long_term_ema_bias_color : na, title='Long-term EMA')
+
+// Fill in the plots to create clouds
+fast_cloud_color = fast_ema_value >= pivot_ema_value ? color.new(bullish_fast_cloud_color, cloud_transparency) : color.new(bearish_fast_cloud_color, cloud_transparency)
+fill(fast_ema_plot, pivot_ema_plot, color=fast_cloud_color, title='Fast Cloud', transp=90)
+pullback_overlap_cloud_color = pullback_overlap_ema_value >= slow_ema_value ? color.new(bullish_slow_cloud_color, cloud_transparency) : color.new(bearish_slow_cloud_color, cloud_transparency)
+fill(pullback_overlap_ema_plot, slow_ema_plot, color=show_pullback_overlap ? pullback_overlap_cloud_color : na, title='Slow Cloud', transp=90)
+slow_cloud_color = pivot_ema_value >= slow_ema_value ? color.new(bullish_slow_cloud_color, cloud_transparency) : color.new(bearish_slow_cloud_color, cloud_transparency)
+fill(pivot_ema_plot, slow_ema_plot, color=show_pullback_overlap ? na : slow_cloud_color, title="Slow Cloud Overlapped", transp=90)
+
+// Conviction Arrows (default based on 13/48)
+bullish_conviction = fast_conviction_ema_value >= slow_conviction_ema_value
+bearish_conviction = fast_conviction_ema_value < slow_conviction_ema_value
+bullish_conviction_confirmed = bullish_conviction[0] == true and bullish_conviction[1] == false
+bearish_conviction_confirmed = bearish_conviction[0] == true and bearish_conviction[1] == false
+plotshape(bullish_conviction_confirmed and show_conviction_arrows, style=shape.triangleup, color=bullish_conviction_color, location=location.abovebar, size=size.tiny)
+plotshape(bearish_conviction_confirmed and show_conviction_arrows, style=shape.triangledown, color=bearish_conviction_color, location=location.belowbar, size=size.tiny)
+fast_conviction_ema_plot = plot(fast_conviction_ema_value, color=show_fast_conviction_ema ? fast_conviction_ema_color : na, title='Fast Conviction EMA')
+slow_conviction_ema_plot = plot(slow_conviction_ema_value, color=show_slow_conviction_ema ? slow_conviction_ema_color : na, title='Slow Conviction EMA')
+
+// # Bollinger Band Compression Signal
+compression_pivot = ta.ema(close, 21)
+above_compression_pivot = close >= compression_pivot
+bband_offset = 2.0 * ta.stdev(close, 21)
+bband_up = compression_pivot + bband_offset
+bband_down = compression_pivot - bband_offset
+compression_threshold_up = compression_pivot + (2.0 * ta.atr(14))
+compression_threshold_down = compression_pivot - (2.0 * ta.atr(14))
+expansion_threshold_up = compression_pivot + (1.854 * ta.atr(14))
+expansion_threshold_down = compression_pivot - (1.854 * ta.atr(14))
+compression = above_compression_pivot ? (bband_up - compression_threshold_up) : (compression_threshold_down - bband_down)
+in_expansion_zone = above_compression_pivot ? (bband_up - expansion_threshold_up) : (expansion_threshold_down - bband_down)
+expansion = compression[1] <= compression[0]
+compression_tracker = false
+if expansion and in_expansion_zone > 0
+    compression_tracker := false
+else if compression <= 0 
+    compression_tracker := true
+else 
+    compression_tracker := false
+
+// Candle Bias
+bias_ema_value = request.security(syminfo.tickerid, timeframe_func(), ta.ema(price, bias_ema)[barstate.isrealtime ? 1 : 0], gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off)
+above_pivot = close >= bias_ema_value
+below_pivot = close < bias_ema_value
+up = open < close
+doji = open == close
+down = open > close
+bias_candle_color = 
+         compression_tracker and up and show_candle_bias_compression_candles and compression_colors == "Clean" ? saty_light_gray :
+         compression_tracker and down and show_candle_bias_compression_candles and compression_colors == "Clean" ? saty_gray :
+         compression_tracker and up and show_candle_bias_compression_candles and compression_colors == 
+         "Classic" ? saty_violet :
+         compression_tracker and down and show_candle_bias_compression_candles and compression_colors == 
+         "Classic" ? saty_purple :
+         above_pivot and up and show_candle_bias ? candle_up_color :
+         below_pivot and up and show_candle_bias ? candle_up_bearish_bias_color :
+         above_pivot and down and show_candle_bias ? candle_down_bullish_bias_color :
+         below_pivot and down and show_candle_bias ? candle_down_color :
+         up ? candle_up_color :
+         down ? candle_down_color :
+         doji ? saty_gray :
+         na
+
+plotcandle(open,high,low,close,color = bias_candle_color, bordercolor = bias_candle_color, wickcolor = bias_candle_color)
