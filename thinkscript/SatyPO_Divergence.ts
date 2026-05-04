@@ -206,10 +206,10 @@ pHidBearExt.SetLineWeight(4);
 # up = no  → bubble below the value (bullish)
 # up = yes → bubble above the value (bearish)
 
-AddChartBubble(xBull,    spo, "B*",  Color.GREEN,              no);
-AddChartBubble(xHidBull, spo, "hB*", Color.CYAN,               no);
-AddChartBubble(xBear,    spo, "R*",  Color.RED,                yes);
-AddChartBubble(xHidBear, spo, "hR*", CreateColor(255,165,0),   yes);
+AddChartBubble(xBull,    spo, "Extreme", Color.GREEN,             no);
+AddChartBubble(xHidBull, spo, "Extreme", Color.CYAN,              no);
+AddChartBubble(xBear,    spo, "Extreme", Color.RED,               yes);
+AddChartBubble(xHidBear, spo, "Extreme", CreateColor(255,165,0),  yes);
 
 # ── Alerts ─────────────────────────────────────────────────────────────────────
 Alert(xBull,    "SPO Extreme Regular Bull Div",  Alert.BAR, Sound.Ding);
