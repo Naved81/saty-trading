@@ -49,6 +49,20 @@ def iatr    = WildersAverage(trueRng, atrLen);
 def rawSPO  = if iatr != 0 then ((close - pivEMA) / (3 * iatr)) * 100 else 0;
 def spo     = ExpAverage(rawSPO, smoothSpan);
 
+# ── SPO line — coloured by zone ───────────────────────────────────────────────
+# Declared first so it appears leftmost in the info pane on hover
+plot SPOLine = spo;
+SPOLine.SetLineWeight(2);
+SPOLine.AssignValueColor(
+    if      spo >=  xLevel then Color.RED
+    else if spo >=  61.8   then CreateColor(255,140,0)
+    else if spo >=  23.6   then Color.YELLOW
+    else if spo >  -23.6   then Color.LIGHT_GRAY
+    else if spo >  -61.8   then Color.CYAN
+    else if spo >  -xLevel then Color.GREEN
+    else                        CreateColor(50,230,50)
+);
+
 # ── Zone reference lines ───────────────────────────────────────────────────────
 plot ZeroLine  = 0;
 plot XUp       = xLevel;
@@ -66,18 +80,11 @@ DistDown.SetDefaultColor(CreateColor(0,180,70));  DistDown.SetStyle(Curve.SHORT_
 AccUp.SetDefaultColor(Color.DARK_GRAY);        AccUp.SetStyle(Curve.SHORT_DASH);
 AccDown.SetDefaultColor(Color.DARK_GRAY);      AccDown.SetStyle(Curve.SHORT_DASH);
 
-# ── SPO line — coloured by zone ───────────────────────────────────────────────
-plot SPOLine = spo;
-SPOLine.SetLineWeight(2);
-SPOLine.AssignValueColor(
-    if      spo >=  xLevel then Color.RED
-    else if spo >=  61.8   then CreateColor(255,140,0)
-    else if spo >=  23.6   then Color.YELLOW
-    else if spo >  -23.6   then Color.LIGHT_GRAY
-    else if spo >  -61.8   then Color.CYAN
-    else if spo >  -xLevel then Color.GREEN
-    else                        CreateColor(50,230,50)
-);
+# Hide reference lines and arrow plots from the info pane — their values are
+# constants or redundant with SPOLine, so they only add clutter on hover.
+ZeroLine.HideTitle(); XUp.HideTitle(); XDown.HideTitle();
+DistUp.HideTitle();   DistDown.HideTitle();
+AccUp.HideTitle();    AccDown.HideTitle();
 
 # ── Oscillator pivot detection ────────────────────────────────────────────────
 #
@@ -201,6 +208,11 @@ plot pHidBearExt = if xHidBear then spo else Double.NaN;
 pHidBearExt.SetPaintingStrategy(PaintingStrategy.ARROW_DOWN);
 pHidBearExt.SetDefaultColor(CreateColor(255,165,0));
 pHidBearExt.SetLineWeight(4);
+
+pBullNorm.HideTitle();  pBullExt.HideTitle();
+pHidBullNorm.HideTitle(); pHidBullExt.HideTitle();
+pBearNorm.HideTitle();  pBearExt.HideTitle();
+pHidBearNorm.HideTitle(); pHidBearExt.HideTitle();
 
 # ── Text bubbles — extreme signals only ───────────────────────────────────────
 # up = no  → bubble below the value (bullish)
