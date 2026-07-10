@@ -22,7 +22,7 @@ venv/
 env/
 
 # Data files — exclude downloaded files but keep scripts
-data/
+data/*
 !data/*.py
 *.gz
 *.parquet
